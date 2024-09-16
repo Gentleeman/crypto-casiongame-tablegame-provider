@@ -20,13 +20,7 @@ app.use(bodyParser.raw({ type: 'application/vnd.custom-type' }));
 app.use(bodyParser.text({ type: 'text/html' }));
 app.use(methodOverride());
 
-const corsOptions: cors.CorsOptions = {
-  origin: '*'
-};
-
-app.use(cors({
-  origin: 'http://54.81.231.247:3000/'
-}));
+app.use(cors('*' as cors.CorsOptions));
 
 sequelize.sync()
   .then(() => {
