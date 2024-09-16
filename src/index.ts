@@ -24,7 +24,7 @@ const corsOptions: cors.CorsOptions = {
   origin: '*'
 };
 
-app.use(cors(corsOptions));
+app.use(cors());
 
 sequelize.sync()
   .then(() => {
