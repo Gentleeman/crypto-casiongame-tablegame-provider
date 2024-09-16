@@ -21,7 +21,7 @@ app.use(bodyParser.text({ type: 'text/html' }));
 app.use(methodOverride());
 
 const corsOptions: cors.CorsOptions = {
-  origin: '*', // 모든 Origin 허용
+  origin: '*'
 };
 
 app.use(cors(corsOptions));
