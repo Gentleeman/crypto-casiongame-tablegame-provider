@@ -24,7 +24,9 @@ const corsOptions: cors.CorsOptions = {
   origin: '*'
 };
 
-app.use(cors());
+app.use(cors({
+  origin: 'http://54.81.231.247:3000/'
+}));
 
 sequelize.sync()
   .then(() => {
