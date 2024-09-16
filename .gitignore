@@ -128,3 +128,6 @@ dist
 .pnp.*
 
 teams/
+
+package-lock.json
+yarn.lock
