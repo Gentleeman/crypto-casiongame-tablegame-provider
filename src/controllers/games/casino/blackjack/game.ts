@@ -3,7 +3,7 @@ import * as engine from './engine';
 import * as actions from './actions';
 import { defaultState, getDefaultSideBets, getRules } from './presets';
 import { getProfit } from './base';
-import { GameLists } from '../../../../models';
+import GameLists from './../../../../models/games/gamelist';
 
 const appendEpoch = (obj: any) => {
     const { payload = { bet: 0 } } = obj;
@@ -696,15 +696,15 @@ export default class Game {
                 const dealerValue = engine.calculate(dealerCards);
                 const dealerHasBlackjack = engine.isBlackjack(dealerCards);
                 const dealerHasBusted = dealerValue?.hi > 21;
-
                 const prizes = engine.getPrizes(this.state);
-                const { input, output } = await getProfit(this.state.currency);
+
+                const { input, output } = await getProfit(1);
                 const rtp =
                     ((output + prizes.wonOnRight + prizes.wonOnLeft) /
                         (input +
                             (prizes.finalBet ? prizes.finalBet : initialBet))) *
                     100;
-                const gamelist = await GameLists.findOne({ id: 'blackjack' });
+                const gamelist = await GameLists.findOne({ where: {gid: 'blackjack'} });
                 const rightValue = engine.calculate(handInfo.right.cards);
                 let stage = null as any;
                 if (dealerValue?.hi < 17) {
@@ -715,7 +715,7 @@ export default class Game {
                         engine.isSoftHand(dealerCards)
                     ) {
                         stage = TYPES.STAGE_DEALER_TURN;
-                    } else if (rtp < gamelist.rtp) {
+                    } else if (rtp < (gamelist?.rtp ?? 0)) {
                         stage = TYPES.STAGE_DONE;
                     } else {
                         if (

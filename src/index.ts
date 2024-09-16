@@ -8,6 +8,7 @@ import * as useragent from 'express-useragent';
 import * as methodOverride from 'method-override';
 import rateLimit from 'express-rate-limit';
 import routes2 from './routes2';
+import sequelize  from './db';
 
 const app = express();
 
@@ -21,6 +22,11 @@ app.use(methodOverride());
 
 app.use(cors('*' as cors.CorsOptions));
 
+sequelize.sync()
+  .then(() => {
+    console.log('Database & tables created!');
+  });
+
 const apiV2Limiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 1000,
@@ -29,3 +35,8 @@ const apiV2Limiter = rateLimit({
 });
 
 app.use('/api/v2/', apiV2Limiter, routes2);
+
+// Start the server
+app.listen(process.env.PORT, () => {
+    console.log(`Server is running on port ${process.env.PORT}`);
+  });

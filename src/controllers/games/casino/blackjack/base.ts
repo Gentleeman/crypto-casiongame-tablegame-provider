@@ -1,15 +1,24 @@
+import { where, Op } from 'sequelize';
+import sequelize from './../../../../db';
+import Games from './../../../../models/games/game';
+import Balances from './../../../../models/payments/balances';
+import Currencies from './../../../../models/payments/currencies';
+import BalanceHistories from './../../../../models/payments/balancehistories';
+import Sessions from './../../../../models/users/sessions';
+import Users from './../../../../models/users/users';
 
-import mongoose from 'mongoose';
-import { BalanceHistories, Balances, Currencies, Games, Sessions, Users } from './../../../../models';
 
 const NumberFix = (number: number, decimal = 10): number => {
     return Number(Number(number).toFixed(decimal));
 };
 
-export const checkBalance = async ({ userId, currency, amount }: { userId: string; currency: string; amount: number }) => {
+export const checkBalance = async ({ userId, currency, amount }: { userId: number; currency: number; amount: number }) => {
+    console.log(`currency in checkBalance`, currency);
     const balance = await Balances.findOne({
-        userId: ObjectId(userId),
-        currency: ObjectId(currency)
+        where: {
+            userId: userId,
+            currencyId: currency
+        }
     });
     if (balance?.balance && balance.balance >= amount) {
         return true;
@@ -18,16 +27,19 @@ export const checkBalance = async ({ userId, currency, amount }: { userId: strin
     }
 };
 
-export const checkMaxBet = async ({ currency, amount }: { currency: string; amount: number }) => {
-    const data = await Currencies.findById(ObjectId(currency));
-    if (data.maxBet >= amount && data.minBet <= amount) {
+export const checkMaxBet = async ({ currency, amount }: { currency: number; amount: number }) => {
+    console.log(`currency in checkMaxBet`, currency);
+
+    const data = await Currencies.findOne({where: {id: currency}});
+
+    if ((data?.maxBet ?? 0) >= amount && (data?.minBet ?? 0) <= amount) {
         return true;
     } else {
         return false;
     }
 };
 
-export const generatInfo = (): string => {
+export const generateInfo = (): string => {
     return String(Date.now() + Math.random());
 };
 
@@ -40,92 +52,73 @@ export const handleBet = async ({
     info = '',
     status = false
 }: {
-    req?: any | undefined;
-    userId: string;
+    req?: any;
+    userId: number;
     amount: number;
-    currency: string;
+    currency: number;
     type: string;
     info: string;
-    status?: boolean | undefined;
+    status?: boolean;
 }) => {
-    const user = await Users.findById(ObjectId(userId));
-    if (status && user?.rReferral && user.rReferral !== '') {
-        const rUser = await Users.findOne({ iReferral: user.rReferral });
-        const userId1 = ObjectId(userId);
-        const userId2 = ObjectId(rUser?._id);
-        const amount1 = NumberFix(amount * 0.95);
-        const amount2 = NumberFix(amount * 0.05);
-        const result1 = await Balances.findOneAndUpdate(
-            { userId: userId1, currency: ObjectId(currency) },
-            { $inc: { balance: amount1 } },
-            { new: true }
-        );
-        const result2 = await Balances.findOneAndUpdate(
-            { userId: userId2, currency: ObjectId(currency) },
-            { $inc: { balance: amount2 } },
-            { new: true, upsert: true }
-        );
-        const currentBalance1 = NumberFix(result1.balance);
-        const beforeBalance1 = NumberFix(result1.balance - amount);
-        const currentBalance2 = NumberFix(result2.balance);
-        const beforeBalance2 = NumberFix(result2.balance - amount);
-        await BalanceHistories.create({
-            userId: userId1,
-            amount: amount1,
-            currency,
-            type,
-            currentBalance: currentBalance1,
-            beforeBalance: beforeBalance1,
-            info
-        });
-        await BalanceHistories.create({
-            userId: userId2,
-            amount: amount2,
-            currency,
-            type: 'referral-bonus',
-            currentBalance: currentBalance2,
-            beforeBalance: beforeBalance2,
-            info
-        });
-        if (result1.status && !result1.disabled && req) {
-            const session = await Sessions.findOne({ userId });
-            if (session && session.socketId) req.app.get('io').to(session.socketId).emit('balance', { balance: result1.balance });
-        }
-        return result1;
+    const user = await Users.findByPk(userId);
+    console.log(`currency in handleBet`, currency);
+    if (status) {
+        // const userId1 = userId;
+        // const amount1 = NumberFix(amount);
+        // const result1 = await Balances.findOneAndUpdate(
+        //     { userId: userId1, currency: currency },
+        //     { $inc: { balance: amount1 } },
+        //     { new: true }
+        // );
+        // const currentBalance1 = NumberFix(result1.balance);
+        // const beforeBalance1 = NumberFix(result1.balance - amount);
+        // await BalanceHistories.create({
+        //     userId: userId1,
+        //     amount: amount1,
+        //     currency,
+        //     type,
+        //     currentBalance: currentBalance1,
+        //     beforeBalance: beforeBalance1,
+        //     info
+        // });
+        // if (result1.status && !result1.disabled && req) {
+        //     const session = await Sessions.findOne({ userId });
+        //     if (session && session.socketId) req.app.get('io').to(session.socketId).emit('balance', { balance: result1.balance });
+        // }
+        // return result1;
     } else {
-        const result = await Balances.findOneAndUpdate(
-            { userId: ObjectId(userId), currency: ObjectId(currency) },
-            { $inc: { balance: NumberFix(amount) } },
-            { new: true }
+        const result = await Balances.update(
+            { balance: sequelize.literal(`balance + ${NumberFix(amount)}`) },
+            {
+                where: {
+                    userId: userId,
+                    currencyId: currency,
+                },
+                returning: true, // 업데이트된 레코드 반환
+            }
         );
-        const currentBalance = NumberFix(result.balance);
-        const beforeBalance = NumberFix(result.balance - amount);
+        const currentBalance = NumberFix(result[1][0].balance);
+        const beforeBalance = NumberFix(result[1][0].balance - amount);
+
         await BalanceHistories.create({
             userId,
             amount,
-            currency,
+            currencyId: currency,
             type,
             currentBalance,
             beforeBalance,
             info
         });
-        if (result.status && !result.disabled && req) {
-            const session = await Sessions.findOne({ userId });
-            if (session && session.socketId) req.app.get('io').to(session.socketId).emit('balance', { balance: result.balance });
-        }
-        return result;
+        // if (result[1][0].status && !result[1][0].disabled && req) {
+        //     // const session = await Sessions.findOne({ userId });
+        //     // if (session && session.socketId) req.app.get('io').to(session.socketId).emit('balance', { balance: result.balance });
+        // }
+
+        return result[1][0];
     }
 };
 
-export const ObjectId = (id: string) => {
-    try {
-        return new mongoose.Types.ObjectId(id);
-    } catch (error) {
-        console.log('ObjectId', id);
-    }
-};
-
-export const getProfit = async (currency: string, dates = []) => {
+export const getProfit = async (currency = 1, dates = []) => {
     const date = new Date();
     let firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
     let lastDay = new Date(firstDay.getTime() + 2678400000);
@@ -137,10 +130,17 @@ export const getProfit = async (currency: string, dates = []) => {
     let win = 0;
     let input = 0;
     let output = 0;
-    const allGames = await Games.find({
-        status: { $ne: 'BET' },
-        currency: ObjectId(currency),
-        createdAt: { $gte: firstDay, $lte: lastDay }
+    const allGames = await Games.findAll({
+        where: {
+            status: {
+                [Op.ne]: 'BET' // not equal
+            },
+            currencyId: currency,
+            created_at: {
+                [Op.gte]: firstDay, // greater than or equal
+                [Op.lte]: lastDay   // less than or equal
+            }
+        }
     });
     for (const key in allGames) {
         input += allGames[key].amount;

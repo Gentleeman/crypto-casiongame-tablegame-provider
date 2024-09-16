@@ -38,7 +38,7 @@ export const defaultState = (rules: any) => {
     return {
         isfunc: false,
         hits: 0,
-        currency: '',
+        currency: 0,
         initialBet: 0,
         finalBet: 0,
         finalWin: 0,

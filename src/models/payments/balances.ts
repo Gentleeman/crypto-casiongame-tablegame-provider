@@ -1,46 +1,72 @@
-import { Schema, model } from 'mongoose';
+// src/models/Balance.ts
+import { DataTypes, Model, Optional } from 'sequelize';
+import sequelize from './../../db';
 
-const BalancesSchema = new Schema(
+interface BalanceAttributes {
+    id: number; // Assuming ObjectId is stored as a string
+    userId: number; // Assuming ObjectId is stored as a string
+    currencyId: number; // Assuming ObjectId is stored as a string
+    balance: number;
+    status: boolean;
+    disabled: boolean;
+    created_at?: Date; // Optional for Sequelize
+    updated_at?: Date; // Optional for Sequelize
+}
+
+interface BalanceCreationAttributes extends Optional<BalanceAttributes, 'created_at' | 'updated_at'> {}
+
+class Balance extends Model<BalanceAttributes, BalanceCreationAttributes> implements BalanceAttributes {
+    public id!: number;
+    public userId!: number;
+    public currencyId!: number;
+    public balance!: number;
+    public status!: boolean;
+    public disabled!: boolean;
+
+    // Timestamps
+    public readonly created_at!: Date;
+    public readonly updated_at!: Date;
+}
+
+Balance.init(
     {
-        userId: {
-            type: Schema.Types.ObjectId,
-            required: true,
-            ref: 'users'
+        id: {
+            type: DataTypes.NUMBER,
+            primaryKey: true, // Assuming 'id' is the primary key
+            allowNull: false,
         },
-        currency: {
-            type: Schema.Types.ObjectId,
-            required: true,
-            ref: 'currencies'
+        userId: {
+            type: DataTypes.NUMBER,
+            allowNull: false,
+            field: `userId`,
+        },
+        currencyId: {
+            type: DataTypes.NUMBER, // Change to STRING if using ObjectId as a string
+            allowNull: false,
+            field: `currencyId`,
         },
         balance: {
-            type: Number,
-            default: 0,
-            required: true
+            type: DataTypes.FLOAT, // Use FLOAT for decimal numbers
+            defaultValue: 0,
+            allowNull: false,
         },
         status: {
-            type: Boolean,
-            default: true,
-            required: true
+            type: DataTypes.BOOLEAN,
+            defaultValue: true,
+            allowNull: false,
         },
         disabled: {
-            type: Boolean,
-            default: false,
-            required: true
-        }
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+            allowNull: false,
+        },
     },
-    { timestamps: true }
+    {
+        sequelize,
+        tableName: 'balances',
+        timestamps: true,
+        underscored: true, // Use underscored field names
+    }
 );
 
-BalancesSchema.pre('findOneAndUpdate', function () {
-    this.populate('currency');
-});
-
-BalancesSchema.pre('find', function () {
-    this.populate('currency');
-});
-
-BalancesSchema.pre('findOne', function () {
-    this.populate('currency');
-});
-
-export const Balances = model('balances', BalancesSchema);
+export default Balance;

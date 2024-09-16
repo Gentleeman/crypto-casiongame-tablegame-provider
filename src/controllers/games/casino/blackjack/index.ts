@@ -1,8 +1,11 @@
-import Game from './game';
-import * as actions from './actions';
-import { Games, GameLists } from '../../../../models';
-import { checkBalance, checkMaxBet, generatInfo, handleBet, ObjectId } from './base';
 import { Request, Response, NextFunction } from 'express';
+import * as actions from './actions';
+import Game from './game';
+import GameLists from './../../../../models/games/gamelist';
+import sequelize from '../../../../db';
+import Games from './../../../../models/games/game';
+import { checkBalance, checkMaxBet, generateInfo, handleBet } from './base';
+import { type } from 'os';
 
 const getScore = (cards: any) => {
     const score = cards.reduce((sum: number, card: any) => {
@@ -37,6 +40,7 @@ const settled = async ({
     split?: boolean | undefined;
 }) => {
     const { history, dealerCards, wonOnRight, wonOnLeft } = game.getState();
+
     const score = getScore([dealerCards[0], dealerCards[1]]);
     let status = 'LOST';
     let playerStatus = 'LOST';
@@ -52,6 +56,7 @@ const settled = async ({
         splitStatus = 'WIN';
     }
     let profit = wonOnRight + wonOnLeft;
+
     if (profit === games.amount) {
         status = 'DRAW';
     } else if (profit > 0) {
@@ -71,38 +76,49 @@ const settled = async ({
     for (const i in dealerCard) {
         dealerDraw.push(getCard(dealerCard[i]));
     }
-    const check = await Games.findById(ObjectId(_id));
-    const result = await Games.findByIdAndUpdate(
-        _id,
+
+    const check = (await Games.findOne({ where: { id: _id } })) as any;
+
+    const result = (await Games.update(
         {
             profit,
             status,
             aBetting: game.getState(),
-            $inc: { 'betting.turn': 1 }
+            betting: {
+                ...check?.betting,
+                turn: (check?.betting?.turn ?? 0) + 1
+            }
         },
-        { new: true }
-    );
-    if (profit && check.status === 'BET')
+        {
+            where: { id: _id },
+            returning: true
+        }
+    )) as any;
+
+    const resultData = result[1][0];
+    if (profit && check?.status === 'BET') {
         await handleBet({
             req,
-            currency: games.currency,
+            currency: games.currencyId,
             userId: games.userId,
             amount: profit,
             type: 'casino-bet-settled(blackjack)',
-            info: result._id
+            info: `${resultData?.id}`
         });
+    }
+
     if (split) {
         return {
             type: 'finish',
-            turn: result.betting.turn,
+            turn: resultData?.betting?.turn,
             player: {
                 status: playerStatus,
-                odds: wonOnRight ? (wonOnRight / result.amount) * 2 : 0,
+                odds: wonOnRight ? (wonOnRight / resultData?.amount) * 2 : 0,
                 profit: wonOnRight
             },
             split: {
                 status: splitStatus,
-                odds: wonOnLeft ? (wonOnLeft / result.amount) * 2 : 0,
+                odds: wonOnLeft ? (wonOnLeft / resultData?.amount) * 2 : 0,
                 profit: wonOnLeft
             },
             betting: {
@@ -113,8 +129,8 @@ const settled = async ({
     } else {
         return {
             type: 'finish',
-            turn: result.betting.turn,
-            odds: profit ? profit / result.amount : 0,
+            turn: resultData?.betting?.turn,
+            odds: profit ? profit / resultData?.amount : 0,
             profit,
             split,
             status,
@@ -126,23 +142,25 @@ const settled = async ({
     }
 };
 
-export const Blackjack = async (req: Request, res: Response, next: NextFunction) => {
+export const Blackjack = async (req: Request, res: Response) => {
     switch (req.body.type) {
         case 'info': {
-
             const { userId, currency, amount } = req.body;
-            const gamelist = await GameLists.findOne({ id: req.body.gameId });
-            const gameId = gamelist._id;
-            const providerId = gamelist.providerId;
+
+            const gamelist = await GameLists.findOne({ where: { gid: req.body?.gameId } });
+            const gameId = gamelist?.dataValues?.id;
 
             const exist = await Games.findOne({
-                userId,
-                currency,
-                gameId,
-                status: 'BET'
+                where: {
+                    userId: currency,
+                    currencyId: currency,
+                    gameId,
+                    status: 'BET'
+                }
             });
 
             if (exist) {
+                console.log(`exist game`);
                 return res.json(exist);
             }
             const checked = await checkBalance({ userId, currency, amount });
@@ -159,37 +177,85 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
                 userId,
                 amount: amount * -1,
                 type: 'casino-bet(blackjack)',
-                info: generatInfo()
+                info: generateInfo()
             });
             const game = new Game({ currency, init: true });
             await game.dispatch(actions.deal({ bet: Number(amount) }));
             const gameData = {
-                providerId,
                 userId,
-                currency,
+                currencyId: currency,
                 gameId,
                 amount,
                 odds: 2,
                 aBetting: game.getState(),
                 betting: { player: [], dealer: {}, turn: 0 }
             };
-            const games = await Games.findOneAndUpdate({ userId, currency, gameId, status: 'BET' }, gameData, { upsert: true, new: true });
+
+            let games;
+            const existingGame = await Games.findOne({
+                where: {
+                    userId,
+                    currencyId: currency,
+                    gameId,
+                    status: 'BET'
+                }
+            });
+
+            if (existingGame) {
+                await Games.update(gameData, {
+                    where: {
+                        userId,
+                        currencyId: currency,
+                        gameId,
+                        status: 'BET'
+                    }
+                });
+                games = await Games.findOne({
+                    where: {
+                        userId,
+                        currencyId: currency,
+                        gameId,
+                        status: 'BET'
+                    }
+                });
+            } else {
+                const newGame = await Games.create({
+                    ...gameData,
+                    profit: 0,
+                    status: 'BET',
+                    gameId: gameId!
+                });
+                games = newGame;
+            }
+
             const { handInfo, dealerCards } = game.getState();
+
             const betting = {
                 player: [getCard(handInfo.right.cards[0]), getCard(handInfo.right.cards[1])],
                 dealer: getCard(dealerCards[0]),
                 turn: 1
             };
-            const result = await Games.findByIdAndUpdate(games._id, { betting }, { new: true });
-            return res.json(result);
+
+            const result = await Games.update(
+                {
+                    betting,
+                    status: 'BET'
+                },
+                {
+                    where: { id: games?.id },
+                    returning: true
+                }
+            );
+
+            return res.json(result[1][0]);
         }
         case 'split': {
             const { userId, betId } = req.body;
-            const _id = ObjectId(betId);
-            const games = await Games.findById(_id);
+            const _id = betId;
+            const games = await Games.findOne({ where: { id: _id } }) as any;
             const checked = await checkBalance({
                 userId,
-                currency: games.currency,
+                currency: games.currencyId,
                 amount: games.amount
             });
             if (!checked) {
@@ -204,24 +270,28 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
             const { handInfo, dealerCards } = game.getState();
             await handleBet({
                 req,
-                currency: games.currency,
+                currency: games.currencyId,
                 userId,
                 amount: games.amount * -1,
                 type: 'casino-bet-split(blackjack)',
-                info: generatInfo()
+                info: generateInfo()
             });
-            const result = await Games.findByIdAndUpdate(
-                _id,
+            const check = (await Games.findOne({ where: { id: _id } })) as any;
+            const result = await Games.update(
                 {
                     amount: games.amount * 2,
                     aBetting: game.getState(),
-                    $inc: { 'betting.turn': 1 }
+                    betting: {
+                        ...check?.betting,
+                        turn: (check?.betting?.turn ?? 0) + 1
+                    }
                 },
-                { new: true }
+                { where: { id: _id }, returning: true }
             );
+            const resultData = result[1][0] as any;
             return res.json({
                 type: 'continue',
-                turn: result.betting.turn,
+                turn: resultData?.betting?.turn,
                 betting: {
                     player: [getCard(handInfo.right.cards[0]), getCard(handInfo.right.cards[1])],
                     split: [getCard(handInfo.left.cards[0]), getCard(handInfo.left.cards[1])],
@@ -231,11 +301,11 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
         }
         case 'double': {
             const { userId, betId } = req.body;
-            const _id = ObjectId(betId);
-            const games = await Games.findById(_id);
+            const _id = betId;
+            const games = (await Games.findOne({ where: { id: _id } })) as any;
             const checked = await checkBalance({
                 userId,
-                currency: games.currency,
+                currency: games.currencyId,
                 amount: games.amount
             });
             if (!checked) {
@@ -249,26 +319,30 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
             await game.dispatch(actions.double({ position: 'right' }));
             await handleBet({
                 req,
-                currency: games.currency,
+                currency: games.currencyId,
                 userId,
                 amount: games.amount * -1,
                 type: 'casino-bet-double(blackjack)',
-                info: generatInfo()
+                info: generateInfo()
             });
-            const result = await Games.findByIdAndUpdate(
-                _id,
+            const check = (await Games.findOne({ where: { id: _id } })) as any;
+            const result = await Games.update(
                 {
                     amount: games.amount * 2,
                     aBetting: game.getState(),
-                    $inc: { 'betting.turn': 1 }
+                    betting: {
+                        ...check?.betting,
+                        turn: (check?.betting?.turn ?? 0) + 1
+                    }
                 },
-                { new: true }
+                { where: { id: _id }, returning: true }
             );
             const cards = game.getState().handInfo.right.cards;
             const card = getCard(cards[cards.length - 1]);
+            const gameData = result[1][0] as any;
             return res.json({
                 type: 'continue',
-                turn: result.betting.turn,
+                turn: gameData?.betting?.turn,
                 betting: {
                     player: card
                 }
@@ -276,11 +350,12 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
         }
         case 'insurance': {
             const { userId, betId, bet } = req.body;
-            const _id = ObjectId(betId);
-            const games = await Games.findById(_id);
+            const _id = betId;
+            const games = await Games.findOne({ where: { id: _id } }) as any;
+
             const checked = await checkBalance({
                 userId,
-                currency: games.currency,
+                currency: games.currencyId,
                 amount: games.amount * 0.5
             });
             if (!checked) {
@@ -291,39 +366,68 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
                 await game.dispatch(actions.insurance({ bet: 1 }));
                 await handleBet({
                     req,
-                    currency: games.currency,
+                    currency: games.currencyId,
                     userId,
                     amount: games.amount * -0.5,
                     type: 'casino-bet-insurance(blackjack)',
-                    info: generatInfo()
+                    info: generateInfo()
                 });
-                await Games.updateOne(
-                    { _id },
+                const check = (await Games.findOne({ where: { id: _id } })) as any;
+                const resAmount = parseFloat(games.amount) * 1.5;
+
+                await Games.update(
                     {
-                        amount: games.amount * 1.5,
+                        amount: resAmount,
                         aBetting: game.getState(),
-                        $inc: { 'betting.turn': 1 }
-                    }
+                        betting: {
+                            ...check?.betting,
+                            turn: (check?.betting?.turn ?? 0) + 1
+                        }
+                    },
+                    { where: { id: _id }, returning: true }
                 );
+
             } else {
                 await game.dispatch(actions.insurance({ bet: 0 }));
-                await Games.updateOne({ _id }, { aBetting: game.getState(), $inc: { 'betting.turn': 1 } });
+                const check = (await Games.findOne({ where: { id: _id } })) as any;
+
+                await Games.update(
+                    {
+                        aBetting: game.getState(),
+                        betting: {
+                            ...check?.betting,
+                            turn: (check?.betting?.turn ?? 0) + 1
+                        }
+                    },
+                    { where: { id: _id }, returning: true }
+                );
+
             }
             return res.json(games);
         }
         case 'hit': {
-            const _id = ObjectId(req.body.betId);
-            const games = await Games.findById(_id);
-            const game = new Game(games.aBetting);
+            const _id = req.body.betId;
+            const games = (await Games.findOne({ where: { id: _id } })) as any;
+            const game = new Game(games?.aBetting);
             const stage = game.getState().stage;
             if (stage === 'player-turn-right') {
                 await game.dispatch(actions.hit({ position: 'right' }));
-                await Games.updateOne({ _id }, { aBetting: game.getState(), $inc: { 'betting.turn': 1 } });
+                const check = (await Games.findOne({ where: { id: _id } })) as any;
+                await Games.update(
+                    {
+                        aBetting: game.getState(),
+                        betting: {
+                            ...check?.betting,
+                            turn: (check?.betting?.turn ?? 0) + 1
+                        }
+                    },
+                    { where: { id: _id }, returning: true }
+                );
                 const cards = game.getState().handInfo.right.cards;
                 const card = getCard(cards[cards.length - 1]);
                 const result = {
                     type: 'continue',
-                    turn: games.betting.turn,
+                    turn: games?.betting?.turn,
                     betting: {
                         player: card
                     }
@@ -331,7 +435,17 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
                 return res.json(result);
             } else if (stage === 'player-turn-left') {
                 await game.dispatch(actions.hit({ position: 'left' }));
-                await Games.updateOne({ _id }, { aBetting: game.getState(), $inc: { 'betting.turn': 1 } });
+                const check = (await Games.findOne({ where: { id: _id } })) as any;
+                await Games.update(
+                    {
+                        aBetting: game.getState(),
+                        betting: {
+                            ...check?.betting,
+                            turn: (check?.betting?.turn ?? 0) + 1
+                        }
+                    },
+                    { where: { id: _id }, returning: true }
+                );
                 const cards = game.getState().handInfo.left.cards;
                 const result = {
                     type: 'continue',
@@ -347,40 +461,49 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
             }
         }
         case 'stand': {
-            const _id = ObjectId(req.body.betId);
-            const games = await Games.findById(_id);
-            const game = new Game(games.aBetting);
+            const _id = req.body.betId;
+            const games = await Games.findOne({ where: { id: _id } }) as any;
+            const game = new Game(games?.aBetting);
             const { stage, history } = game.getState();
             if (history.find((e: any) => e.type === 'SPLIT')) {
                 if (stage === 'player-turn-right') {
                     await game.dispatch(actions.stand({ position: 'right' }));
-                    const result = await Games.findByIdAndUpdate(
-                        _id,
+                    const check = (await Games.findOne({ where: { id: _id } })) as any;
+                    const result = await Games.update(
                         {
                             aBetting: game.getState(),
-                            $inc: { 'betting.turn': 1 }
+                            betting: {
+                                ...check?.betting,
+                                turn: (check?.betting?.turn ?? 0) + 1
+                            }
                         },
-                        { new: true }
+                        { where: { id: _id }, returning: true }
                     );
+                    const gameData = result[1][0] as any;
                     return res.json({
                         type: 'continue',
-                        turn: result.betting.turn
+                        turn: gameData?.betting?.turn
                     });
                 } else if (stage === 'player-turn-left' || stage === 'done') {
                     const cards = game.getState().handInfo.left.cards;
                     const score = getScore(cards);
                     if (req.body.auto && score < 21) {
-                        const result = await Games.findByIdAndUpdate(
-                            _id,
+                        const check = (await Games.findOne({ where: { id: _id } })) as any;
+                        const result = await Games.update(
                             {
                                 aBetting: game.getState(),
-                                $inc: { 'betting.turn': 1 }
+                                betting: {
+                                    ...check?.betting,
+                                    turn: (check?.betting?.turn ?? 0) + 1
+                                }
                             },
-                            { new: true }
+                            { where: { id: _id }, returning: true }
                         );
+                        const gameData = result[1][0] as any;
+
                         return res.json({
                             type: 'continue',
-                            turn: result.betting.turn
+                            turn: gameData?.betting?.turn
                         });
                     } else {
                         if (stage === 'player-turn-left') {
@@ -406,3 +529,5 @@ export const Blackjack = async (req: Request, res: Response, next: NextFunction)
         }
     }
 };
+
+export default Blackjack;

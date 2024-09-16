@@ -283,28 +283,35 @@ export const getPrize = (playerHand: any, dealerCards: any) => {
     } = playerHand;
     const higherValidDealerValue = getHigherValidValue(calculate(dealerCards));
     const dealerHasBlackjack = isBlackjack(dealerCards);
+
     if (!close) {
         return 0;
     }
+
     if (playerHasBusted) {
         return 0;
     }
+
     if (playerHasSurrendered) {
         return bet / 2;
     }
+
     if (playerHasBlackjack && !dealerHasBlackjack) {
         return bet + bet * 1.5;
     }
     const dealerHasBusted = higherValidDealerValue > 21;
+
     if (dealerHasBusted) {
         return bet + bet;
     }
     const higherValidPlayerValue = getHigherValidValue(playerValue);
+
     if (higherValidPlayerValue > higherValidDealerValue) {
         return bet + bet;
     } else if (higherValidPlayerValue === higherValidDealerValue) {
         return bet;
     }
+
     return 0;
 };
 
@@ -313,6 +320,7 @@ export const getPrizes = ({ history, handInfo: { left, right }, dealerCards }: {
         memo += x.value;
         return memo;
     }, 0);
+
     const wonOnRight = getPrize(right, dealerCards);
     const wonOnLeft = getPrize(left, dealerCards);
     return {
