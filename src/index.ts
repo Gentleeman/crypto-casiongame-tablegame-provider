@@ -20,7 +20,7 @@ app.use(bodyParser.raw({ type: 'application/vnd.custom-type' }));
 app.use(bodyParser.text({ type: 'text/html' }));
 app.use(methodOverride());
 
-app.use(cors({ origin: 'http://54.81.231.247:3000' }));
+app.use(cors());
 app.use(express.json());
 
 sequelize.sync().then(() => {
