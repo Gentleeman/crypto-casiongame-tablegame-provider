@@ -34,7 +34,7 @@ const apiV2Limiter = rateLimit({
     legacyHeaders: false
 });
 
-app.use('/api/v2/', apiV2Limiter, routes2);
+app.use('/api/v2/', routes2);
 
 // Start the server
 app.listen(parseInt(process.env.PORT || '8080'), `0.0.0.0`, () => {
