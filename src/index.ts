@@ -21,6 +21,7 @@ app.use(bodyParser.text({ type: 'text/html' }));
 app.use(methodOverride());
 
 app.use(cors('*' as cors.CorsOptions));
+app.use(express.json());
 
 sequelize.sync()
   .then(() => {
